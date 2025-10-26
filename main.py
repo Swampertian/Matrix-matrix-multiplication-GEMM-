@@ -1,16 +1,16 @@
-from matrix import recursive_gemm
+from matrix import recur_gemm_simple
 import numpy as np
-import scipy.sparse as sp
+
 np.random.seed(0)
-A = sp.random(6, 6, density=0.3, format='csr', dtype=np.float64)
-B = sp.random(6, 6, density=0.3, format='csc', dtype=np.float64)
+A = np.random.randint(0, 10, (4, 4))
+B = np.random.randint(0, 10, (4, 4))
 
-# Multiplicação recursiva
-C_rec = recursive_gemm(A, B, threshold=4)
-C_ref = A @ B
+print("Matriz A:\n", A)
+print("Matriz B:\n", B)
 
-# Comparação
-diff = (C_rec - C_ref).power(2).sum()
-print("Erro quadrático total:", diff)
-print("Formas:", C_rec.shape, C_ref.shape)
-print("NNZ (não nulos):", C_rec.nnz, C_ref.nnz)
+C = recur_gemm_simple(A, B, threshold=2)
+
+
+
+print("\nResultado final:\n", C)
+print("\nConfere com np.dot?", np.allclose(C, A @ B))

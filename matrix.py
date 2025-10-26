@@ -14,43 +14,60 @@ def split_by_cols(B, c_cut):
         B = B.tocsc()
     return B[:, :c_cut], B[:, c_cut:]
 
-def recursive_gemm(A,B, threshold=1e6, depth=0, max_depth=20):
-    
+def split_by_rows_nnz(A):
     if not sp.isspmatrix_csr(A):
         A = A.tocsr()
+    nnz_per_row = np.diff(A.indptr)
+    cumulative = np.cumsum(nnz_per_row)
+    half_nnz = cumulative[-1] / 2
+    r_cut = np.searchsorted(cumulative, half_nnz)
+    return A[:r_cut, :], A[r_cut:, :]
+
+def split_by_cols_nnz(B):
     if not sp.isspmatrix_csc(B):
         B = B.tocsc()
+    nnz_per_col = np.diff(B.indptr)
+    cumulative = np.cumsum(nnz_per_col)
+    half_nnz = cumulative[-1] / 2
+    c_cut = np.searchsorted(cumulative, half_nnz)
+    return B[:, :c_cut], B[:, c_cut:]
 
-    # Caso base: checar tamanho efetivo
-    A_nnz_rows = np.count_nonzero(np.diff(A.indptr))  # linhas com nnz
-    B_nnz_cols = np.count_nonzero(np.diff(B.indptr))  # colunas com nnz
-    nnz_mat_size = A_nnz_rows * B_nnz_cols
 
-    # CASO 1: parar recursão e multiplicar diretamente
-    if nnz_mat_size <= threshold or depth >= max_depth:
-        return A @ B  # o SciPy já usa kernels C otimizados
+import numpy as np
 
-    # CASO 2: A "horizontal" (mais colunas que linhas)
+def recur_gemm_simple(A, B, threshold=2, depth=0):
+    indent = "  " * depth  # para visualizar recursão
+    nrows, ncols = A.shape[0], B.shape[1]
+    print(f"{indent}Nível {depth}: {nrows}x{ncols}")
+
+    # CASO 1 — Base: se a matriz for pequena, multiplica direto
+    if A.shape[0] <= threshold or A.shape[1] <= threshold or B.shape[1] <= threshold:
+        print(f"{indent}Caso 1 → multiplicação direta")
+        return A @ B
+
+    # CASO 2 — A "horizontal": mais colunas que linhas
     if A.shape[0] <= A.shape[1]:
-        mid_A = A.shape[1] // 2
-        A1, A2 = split_by_cols(A.tocsc(), mid_A)  # dividir por colunas
-        B1, B2 = split_by_rows(B.tocsr(), mid_A)  # dividir por linhas
-        C1 = recursive_gemm(A1.tocsr(), B1.tocsc(), threshold, depth + 1)
-        C2 = recursive_gemm(A2.tocsr(), B2.tocsc(), threshold, depth + 1)
-        C = C1 + C2  # somar blocos
-        return C
+        print(f"{indent}Caso 2 → A horizontal (divide em 2)")
+        mid = A.shape[1] // 2  # corta no meio das colunas
+        A1, A2 = A[:, :mid], A[:, mid:]
+        B1, B2 = B[:mid, :], B[mid:, :]
+        C1 = recur_gemm_simple(A1, B1, threshold, depth + 1)
+        C2 = recur_gemm_simple(A2, B2, threshold, depth + 1)
+        return C1 + C2
 
-    # CASO 3: A "vertical" (mais linhas que colunas)
+    # CASO 3 — A "vertical": mais linhas que colunas
     else:
-        mid_A = A.shape[0] // 2
-        mid_B = B.shape[1] // 2
-        A1, A2 = split_by_rows(A, mid_A)
-        B1, B2 = split_by_cols(B, mid_B)
-        C11 = recursive_gemm(A1, B1, threshold, depth + 1)
-        C12 = recursive_gemm(A1, B2, threshold, depth + 1)
-        C21 = recursive_gemm(A2, B1, threshold, depth + 1)
-        C22 = recursive_gemm(A2, B2, threshold, depth + 1)
-        C_top = sp.hstack([C11, C12])
-        C_bottom = sp.hstack([C21, C22])
-        C = sp.vstack([C_top, C_bottom])
-        return C
+        print(f"{indent}Caso 3 → A vertical (divide em 4 blocos)")
+        midA = A.shape[0] // 2
+        midB = B.shape[1] // 2
+        A1, A2 = A[:midA, :], A[midA:, :]
+        B1, B2 = B[:, :midB], B[:, midB:]
+        # 4 chamadas recursivas
+        C11 = recur_gemm_simple(A1, B1, threshold, depth + 1)
+        C12 = recur_gemm_simple(A1, B2, threshold, depth + 1)
+        C21 = recur_gemm_simple(A2, B1, threshold, depth + 1)
+        C22 = recur_gemm_simple(A2, B2, threshold, depth + 1)
+        # Junta os blocos
+        top = np.hstack([C11, C12])
+        bottom = np.hstack([C21, C22])
+        return np.vstack([top, bottom])
