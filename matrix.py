@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def split_by_rows(A, r_cut):
@@ -33,9 +33,51 @@ def split_by_cols_nnz(B):
     return B[:, :c_cut], B[:, c_cut:]
 ############################################################
 
-import numpy as np
+def recursive_gemm_parallel(A, B, threshold=2, depth=0, max_workers=4):
 
-def recur_gemm_simple(A, B, threshold=2, depth=0):
+    indent = "  " * depth
+    nrows, ncols = A.shape[0], B.shape[1]
+    print(f"{indent}Nível {depth}: {nrows}x{ncols}")
+
+    if A.shape[0] <= threshold or A.shape[1] <= threshold or B.shape[1] <= threshold:
+        print(f"{indent}Caso 1 → multiplicação direta")
+        return A @ B
+
+    if A.shape[0] <= A.shape[1]:
+        print(f"{indent}Caso 2 → A horizontal (divide em 2)")
+        mid = A.shape[1] // 2
+        A1, A2 = A[:, :mid], A[:, mid:]
+        B1, B2 = B[:mid, :], B[mid:, :]
+        C1 = recursive_gemm_parallel(A1, B1, threshold, depth + 1, max_workers)
+        C2 = recursive_gemm_parallel(A2, B2, threshold, depth + 1, max_workers)
+        return C1 + C2
+    else:
+        print(f"{indent}Caso 3 → A vertical (divide em 4 blocos)")
+        midA = A.shape[0] // 2
+        midB = B.shape[1] // 2
+        A1, A2 = A[:midA, :], A[midA:, :]
+        B1, B2 = B[:, :midB], B[:, midB:]
+
+        # paraleliza as 4 chamadas recursivas
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(recursive_gemm_parallel, A1, B1, threshold, depth + 1, max_workers): "C11",
+                executor.submit(recursive_gemm_parallel, A1, B2, threshold, depth + 1, max_workers): "C12",
+                executor.submit(recursive_gemm_parallel, A2, B1, threshold, depth + 1, max_workers): "C21",
+                executor.submit(recursive_gemm_parallel, A2, B2, threshold, depth + 1, max_workers): "C22",
+            }
+            results = {}
+            for future in as_completed(futures):
+                key = futures[future]
+                results[key] = future.result()
+
+        top = np.hstack([results["C11"], results["C12"]])
+        bottom = np.hstack([results["C21"], results["C22"]])
+        return np.vstack([top, bottom])
+    
+
+
+def recursive_gemm_simple(A, B, threshold=2, depth=0):
     indent = "  " * depth  # para visualizar recursão
     nrows, ncols = A.shape[0], B.shape[1]
     print(f"{indent}Nível {depth}: {nrows}x{ncols}")
@@ -51,8 +93,8 @@ def recur_gemm_simple(A, B, threshold=2, depth=0):
         mid = A.shape[1] // 2  # corta no meio das colunas
         A1, A2 = A[:, :mid], A[:, mid:]
         B1, B2 = B[:mid, :], B[mid:, :]
-        C1 = recur_gemm_simple(A1, B1, threshold, depth + 1)
-        C2 = recur_gemm_simple(A2, B2, threshold, depth + 1)
+        C1 = recursive_gemm_simple(A1, B1, threshold, depth + 1)
+        C2 = recursive_gemm_simple(A2, B2, threshold, depth + 1)
         return C1 + C2
 
     # CASO 3 — A "vertical": mais linhas que colunas
@@ -63,10 +105,10 @@ def recur_gemm_simple(A, B, threshold=2, depth=0):
         A1, A2 = A[:midA, :], A[midA:, :]
         B1, B2 = B[:, :midB], B[:, midB:]
         # 4 chamadas recursivas
-        C11 = recur_gemm_simple(A1, B1, threshold, depth + 1)
-        C12 = recur_gemm_simple(A1, B2, threshold, depth + 1)
-        C21 = recur_gemm_simple(A2, B1, threshold, depth + 1)
-        C22 = recur_gemm_simple(A2, B2, threshold, depth + 1)
+        C11 = recursive_gemm_simple(A1, B1, threshold, depth + 1)
+        C12 = recursive_gemm_simple(A1, B2, threshold, depth + 1)
+        C21 = recursive_gemm_simple(A2, B1, threshold, depth + 1)
+        C22 = recursive_gemm_simple(A2, B2, threshold, depth + 1)
         # Junta os blocos
         top = np.hstack([C11, C12])
         bottom = np.hstack([C21, C22])
