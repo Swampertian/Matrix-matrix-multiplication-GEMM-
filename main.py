@@ -10,7 +10,5 @@ print("Matriz B:\n", B)
 
 C = recur_gemm_simple(A, B, threshold=2)
 
-
-
 print("\nResultado final:\n", C)
 print("\nConfere com np.dot?", np.allclose(C, A @ B))

@@ -14,6 +14,7 @@ def split_by_cols(B, c_cut):
         B = B.tocsc()
     return B[:, :c_cut], B[:, c_cut:]
 
+## Funções que dividem com base no número de elementos não nulos
 def split_by_rows_nnz(A):
     if not sp.isspmatrix_csr(A):
         A = A.tocsr()
@@ -22,7 +23,6 @@ def split_by_rows_nnz(A):
     half_nnz = cumulative[-1] / 2
     r_cut = np.searchsorted(cumulative, half_nnz)
     return A[:r_cut, :], A[r_cut:, :]
-
 def split_by_cols_nnz(B):
     if not sp.isspmatrix_csc(B):
         B = B.tocsc()
@@ -31,7 +31,7 @@ def split_by_cols_nnz(B):
     half_nnz = cumulative[-1] / 2
     c_cut = np.searchsorted(cumulative, half_nnz)
     return B[:, :c_cut], B[:, c_cut:]
-
+############################################################
 
 import numpy as np
 
